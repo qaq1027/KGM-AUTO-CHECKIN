@@ -72,10 +72,10 @@ docker compose logs -f        # 查看日志，Ctrl+C 退出（容器继续运�
 |------|------|
 | **扫码登录** | 选择账号数量 → 生成二维码 → 酷狗音乐 APP 扫码确认，凭据自动保存；多账号并行轮询扫码状态 |
 | **手机号登录** | 输入手机号发送验证码（60s 冷却）→ 输入验证码一键登录 |
-| **一键签到** | 点击立即执行签到，实时彩色终端输出（与 Actions 运行日志一致），签到结束显示退出码 |
-| **账号管理** | 查看/删除已登录账号（userid 脱敏显示），展示定时任务与下次执行时间 |
+| **一键签到** | 点击立即执行签到，实时彩色终端输出（与 Actions 运行日志一致），签到结束显示退出码；**当日已完成签到的账号自动跳过**（不再重复请求酷狗 API；通知单独标记"跳过"，全部跳过时不重复发送通知）；**多账号全部并行签到**（`CHECKIN_CONCURRENCY` 可限流，1 为串行） |
+| **账号管理** | 查看/删除已登录账号（userid 脱敏显示），展示定时任务与下次执行时间；支持**独立密码锁**：设置 `ACCOUNTS_PASSWORD` 后需输入该密码才能查看/操作，连续 3 次密码错误锁定 5 分钟（防爆破） |
 
-> - 公网暴露时，请在 `.env` 中设置 `WEBUI_PASSWORD`（参考 `.env.example`）开启访问密码
+> - 公网暴露时，请在 `.env` 中设置 `WEBUI_PASSWORD`（全局访问密码）与 `ACCOUNTS_PASSWORD`（账号管理独立密码），参考 `.env.example`
 > - 通知渠道密钥同样建议写在 `.env`（自动注入容器，不会被提交到仓库）
 
 ### 4. 命令行登录（可选）
@@ -124,9 +124,12 @@ docker compose run --rm kgcheckin node scheduler.js once   # 或命令行方式�
 |------|--------|------|
 | `WEBUI_PORT` | `3000` | WebUI 控制台监听端口 |
 | `WEBUI_PASSWORD` | - | 可选访问密码；设置后所有 API 需携带密钥（公网暴露时建议设置，写在 `.env` 中） |
+| `ACCOUNTS_PASSWORD` | - | 账号管理模块独立密码；设置后查看/删除账号需额外输入，连续 3 次错误锁定 5 分钟 |
+| `ACCOUNTS_MAX_ATTEMPTS` / `ACCOUNTS_LOCK_MINUTES` | `3` / `5` | 可选覆盖防爆破策略（最大错误次数 / 锁定时长） |
 | `CRON_SCHEDULE` | `10 1 * * *` | 签到计划任务（cron 表达式），默认每天北京时间 01:10 |
 | `CRON_TIMEZONE` | `Asia/Shanghai` | 调度器使用的时区 |
 | `RUN_ON_STARTUP` | `false` | 设为 `true` 时容器启动后立即执行一次签到 |
+| `CHECKIN_CONCURRENCY` | 全部并行 | 多账号签到并发路数：默认有几个账号就几路全部并行；设 N 限最多 N 路；设 1 = 逐个串行（每账号内部仍保持 30s 的 VIP 领取节奏） |
 | `USERINFO` | - | 登录凭据（JSON 数组），与 Actions 的 Secret 格式一致；与凭据文件二选一 |
 | `USERINFO_FILE` | `/app/data/userinfo.json` | 凭据文件路径（位于挂载卷内，勿改）；入口脚本会自动读取并作为 `USERINFO` 注入 |
 | 通知渠道变量 | - | `WECOM_BOT_KEY`、`DINGTALK_BOT_KEY`、`FEISHU_BOT_KEY`、`TG_BOT_TOKEN` 等，与下文 Actions 通知 Secret 同名，建议写在 `.env` 中 |
@@ -137,6 +140,7 @@ docker compose run --rm kgcheckin node scheduler.js once   # 或命令行方式�
 - 挂载卷 `./data/` 存放登录凭据（`userinfo.json`）和登录二维码，**请妥善保管，不要提交到仓库**（已加入 `.gitignore`）
 - 通知密钥、WebUI 密码等私密配置写在 `.env` 文件（已被 `.gitignore` 忽略，模板见 `.env.example`），**不要直接写进 docker-compose.yml 提交**
 - 每周日签到时候酷狗 token 会自动刷新并**写回 `data/userinfo.json`**，凭据长期有效，无需手动维护
+- `data/checkin_state.json` 记录当日已完成签到的账号，供手动触发"立即签到"时跳过（按北京时间日期滚动，跨天自动失效；删除该文件可强制重新执行）
 - 日期/星期计算固定按北京时间处理，与容器 `TZ` 无关；调度时区由 `CRON_TIMEZONE` 控制
 - 首次 `up` 后若报权限错误，执行 `sudo chown -R 1000:1000 ./data`（容器以 uid 1000 运行）后重启
 
